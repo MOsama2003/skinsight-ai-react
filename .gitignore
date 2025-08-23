@@ -23,6 +23,8 @@ dist-ssr
 *.json
 !package.json   # keep package.json tracked
 !package-lock.json
+!tsconfig*.json
+!components.json
 !pnpm-lock.yaml
 !yarn.lock
 
