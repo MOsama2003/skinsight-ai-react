@@ -15,6 +15,25 @@ import {
 
 const ResultsSection = () => {
   const [videos, setVideos] = useState([]);
+  const [products, setProducts] = useState([]);
+  const queryProdcuts = [
+    "CeraVe SA Cleanser",
+    "PanOxyl Acne Treatment Bar",
+    "La Roche-Posay Toleriane Purifying Foaming Cleanser",
+  ];
+  const [result, setResult] = useState<null | {
+    diseaseName: string;
+    diseaseFound: boolean;
+    recommendedProducts: any[];
+  }>(null);
+  
+  const options = {
+    method: "GET",
+    headers: {
+      "x-rapidapi-key": `${import.meta.env.VITE_PRODUCTS_API_KEY}`,
+      "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com",
+    },
+  };
 
   // Mock analysis results
   const analysisResult = {
@@ -37,49 +56,60 @@ const ResultsSection = () => {
     whenToSeeDoctor: "If the condition persists for more than 6-8 weeks or worsens significantly."
   };
 
-  const products = [
-    {
-      name: "CeraVe Foaming Facial Cleanser",
-      price: "$12.99",
-      rating: 4.5,
-      reviews: 2847,
-      image: "/api/placeholder/150/150"
-    },
-    {
-      name: "The Ordinary Salicylic Acid 2%",
-      price: "$7.90",
-      rating: 4.3,
-      reviews: 1923,
-      image: "/api/placeholder/150/150"
-    },
-    {
-      name: "Neutrogena Oil-Free Moisturizer",
-      price: "$8.97",
-      rating: 4.4,
-      reviews: 3421,
-      image: "/api/placeholder/150/150"
-    }
-  ];
-
-  
-
   useEffect(() => {
-    const fetchVideos = async () => {
-      // Replace with actual API call
-      const res = await fetch(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=acne treatment&maxResults=3&type=video&key=${import.meta.env.VITE_YOUTUBE_API_KEY}`
-      )
-      const data = await res.json();
-
-
-      setVideos(data.items || []);
+    const mockApiResponse = {
+      diseaseName: "Acne",
+      diseaseFound: false,
+      recommendedProducts: queryProdcuts, 
     };
 
+    setResult(mockApiResponse);
 
-    fetchVideos();
+    if (mockApiResponse.diseaseFound) {
+      fetchVideos();
+      fetchProducts();
+    }
   }, []);
 
+  const fetchVideos = async () => {
+    const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${result.diseaseName} treatment&maxResults=3&type=video&key=${import.meta.env.VITE_YOUTUBE_API_KEY}`
+    )
+    const data = await res.json();
+    setVideos(data.items || []);
+  };
+  
+  const fetchProducts = async () => {
+    try {
+      const results = await Promise.all(
+        result.recommendedProducts.map(async (query) => {
+          const url = `https://real-time-amazon-data.p.rapidapi.com/search?query=${encodeURIComponent(
+            query
+          )}&page=1&country=US&sort_by=RELEVANCE&product_condition=ALL&is_prime=false&deals_and_discounts=NONE`;
 
+          const res = await fetch(url, options);
+          const data = await res.json();
+
+          // pick first product only
+          const p = data?.data?.products?.[0];
+          return p
+            ? {
+                id: p.asin,
+                name: p.product_title,
+                rating: p.product_star_rating || "N/A",
+                reviews: p.product_num_ratings || 0,
+                price: p.product_price || "See on Amazon",
+                image: p.product_photo,
+                url: p.product_url,
+              }
+            : null;
+        })
+      );
+      setProducts(results.filter(Boolean));
+    } catch (err) {
+      console.error("Error fetching products:", err);
+    }
+  };
 
   const getRiskColor = (risk: string) => {
     switch (risk.toLowerCase()) {
@@ -174,79 +204,70 @@ const ResultsSection = () => {
             </div>
           </Card>
 
-          {/* Product Recommendations */}
-          <Card className="p-8 bg-gradient-card shadow-card-medical">
-            <div className="flex items-center gap-3 mb-6">
-              <ShoppingCart className="h-6 w-6 text-primary" />
-              <h3 className="text-2xl font-bold">Recommended Products</h3>
-            </div>
-            
-            <div className="grid md:grid-cols-3 gap-6">
-              {products.map((product, index) => (
-                <Card key={index} className="p-4 hover:shadow-hover-medical transition-all duration-300">
-                  <div className="aspect-square bg-muted rounded-lg mb-4 flex items-center justify-center">
-                    <ShoppingCart className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <h4 className="font-semibold mb-2 line-clamp-2">{product.name}</h4>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex items-center gap-1">
-                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                      <span className="text-sm font-medium">{product.rating}</span>
-                    </div>
-                    <span className="text-sm text-muted-foreground">({product.reviews} reviews)</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold text-primary">{product.price}</span>
-                    <Button variant="outline" size="sm">
-                      <ExternalLink className="h-4 w-4 mr-1" />
-                      View
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </Card>
+          {result?.diseaseFound && (
+            <>
+              {/* Recommended Products */}
+              <Card className="p-8 bg-gradient-card shadow-card-medical">
+                <div className="flex items-center gap-3 mb-6">
+                  <ShoppingCart className="h-6 w-6 text-primary" />
+                  <h3 className="text-2xl font-bold">Recommended Products</h3>
+                </div>
 
-          {/* Educational Videos */}
- <Card className="p-8 bg-gradient-card shadow-card-medical">
-            <div className="flex items-center gap-3 mb-6">
-              <Play className="h-6 w-6 text-primary" />
-              <h3 className="text-2xl font-bold">Educational Resources</h3>
-            </div>
+                <div className="grid md:grid-cols-3 gap-6">
+                  {products.map((product) => (
+                    <Card key={product.id} className="p-4 hover:shadow-hover-medical">
+                      <div className="aspect-square rounded-lg mb-4 flex items-center justify-center overflow-hidden">
+                        {product.image ? (
+                          <img src={product.image} alt={product.name} className="object-contain h-full w-full" />
+                        ) : (
+                          <ShoppingCart className="h-8 w-8 text-muted-foreground" />
+                        )}
+                      </div>
+                      <h4 className="font-semibold mb-2 line-clamp-2">{product.name}</h4>
+                      <div className="flex items-center justify-between">
+                        <span className="text-lg font-bold text-primary">{product.price}</span>
+                        <Button asChild variant="outline" size="sm">
+                          <a href={product.url} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            View
+                          </a>
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </Card>
 
+              {/* Educational Videos */}
+              <Card className="p-8 bg-gradient-card shadow-card-medical">
+                <div className="flex items-center gap-3 mb-6">
+                  <Play className="h-6 w-6 text-primary" />
+                  <h3 className="text-2xl font-bold">Educational Resources</h3>
+                </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
-              {videos.map((video) => (
-                <Card
-                  key={video.id.videoId}
-                  className="overflow-hidden hover:shadow-hover-medical transition-all duration-300"
-                >
-                  <div className="aspect-video">
-                    <iframe
-                      className="w-full h-full"
-                      src={`https://www.youtube.com/embed/${video.id.videoId}`}
-                      title={video.snippet.title}
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    ></iframe>
-                  </div>
+                <div className="grid md:grid-cols-3 gap-6">
+                  {videos.map((video) => (
+                    <Card key={video.id.videoId} className="overflow-hidden">
+                      <div className="aspect-video">
+                        <iframe
+                          className="w-full h-full"
+                          src={`https://www.youtube.com/embed/${video.id.videoId}`}
+                          title={video.snippet.title}
+                          frameBorder="0"
+                          allowFullScreen
+                        ></iframe>
+                      </div>
+                      <div className="p-4">
+                        <h4 className="font-semibold mb-2 line-clamp-2">{video.snippet.title}</h4>
+                        <span className="text-sm text-muted-foreground">{video.snippet.channelTitle}</span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </Card>
+            </>
+          )}
 
-
-                  <div className="p-4">
-                    <h4 className="font-semibold mb-2 line-clamp-2">
-                      {video.snippet.title}
-                    </h4>
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>{video.snippet.channelTitle}</span>
-                      {/* If you don’t have views from API, remove or mock */}
-                      <span>{video.views ? `${video.views} views` : ""}</span>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </Card>
         </div>
       </div>
     </section>
