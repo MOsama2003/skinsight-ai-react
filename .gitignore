@@ -11,6 +11,17 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*.local
+
+# Service account / credentials (VERY IMPORTANT)
+*.json
+!package.json   # keep package.json tracked
+!package-lock.json
+!tsconfig*.json
+!components.json
+!pnpm-lock.yaml
+!yarn.lock
 
 # Editor directories and files
 .vscode/*
