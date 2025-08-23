@@ -1,6 +1,8 @@
-# Welcome to your Lovable project
+# DermaAI - AI-Powered Skin Analysis Platform
 
 ## Project info
+
+**DermaAI** is an advanced AI-powered skin analysis platform that provides professional-grade dermatological insights and personalized treatment recommendations.
 
 **URL**: https://lovable.dev/projects/6fb8a2c5-62b3-4c0b-af67-ae37fc80b5ae
 
