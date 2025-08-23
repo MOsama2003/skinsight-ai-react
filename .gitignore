@@ -7,14 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependency directories
 node_modules
-
-# Build outputs
 dist
 dist-ssr
-
-# Local env files
 *.local
 .env
 .env.*.local
@@ -38,6 +33,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# TypeScript build artifacts
-*.tsbuildinfo

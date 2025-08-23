@@ -1,4 +1,3 @@
-// src/components/ProductCarousel.tsx
 export default function ProductCarousel({ items }: { items: any[] }) {
   if (!items?.length) return null;
   return (

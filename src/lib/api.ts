@@ -1,9 +1,8 @@
-// src/lib/api.ts
 const BASE = (import.meta.env.VITE_API_BASE as string || "").replace(/\/$/, "");
 
 export type ResultShape = {
   condition: string;
-  confidence: number; // 0..1
+  confidence: number;
   risk: "Low" | "Medium" | "High";
   explanation: string;
   possible_causes?: string[];
@@ -22,7 +21,6 @@ export async function analyzeImage(file: File, userId?: string): Promise<Analyze
   const form = new FormData();
   form.append("image", file);
   if (userId) form.append("userId", userId);
-
   const r = await fetch(`${BASE}/analyze`, { method: "POST", body: form });
   if (!r.ok) {
     let msg = "Analyze failed";
@@ -39,16 +37,5 @@ export async function getProducts() {
 
 export async function getVideos(q: string) {
   const r = await fetch(`${BASE}/resources/videos?q=${encodeURIComponent(q)}`);
-  return r.ok ? r.json() : { items: [] };
-}
-
-export async function getResult(scanId: string) {
-  const r = await fetch(`${BASE}/results/${scanId}`, { cache: "no-store" as RequestCache });
-  if (!r.ok) throw new Error("Not found");
-  return r.json();
-}
-
-export async function getHistory(userId: string) {
-  const r = await fetch(`${BASE}/history?userId=${encodeURIComponent(userId)}`, { cache: "no-store" as RequestCache });
   return r.ok ? r.json() : { items: [] };
 }

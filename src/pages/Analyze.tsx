@@ -1,4 +1,3 @@
-// src/pages/Analyze.tsx
 import SkinSightUploadAnalyze from "@/components/SkinSightUploadAnalyze";
 
 export default function Analyze() {
