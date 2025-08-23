@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,8 @@ import {
 } from "lucide-react";
 
 const ResultsSection = () => {
+  const [videos, setVideos] = useState([]);
+
   // Mock analysis results
   const analysisResult = {
     condition: "Mild Acne (Comedonal)",
@@ -58,29 +61,25 @@ const ResultsSection = () => {
     }
   ];
 
-  const videos = [
-    {
-      title: "How to Treat Comedonal Acne - Dermatologist Guide",
-      channel: "DermGuy",
-      duration: "8:45",
-      views: "234K",
-      thumbnail: "/api/placeholder/200/120"
-    },
-    {
-      title: "Best Skincare Routine for Acne-Prone Skin",
-      channel: "Skincare by Hyram",
-      duration: "12:30",
-      views: "891K",
-      thumbnail: "/api/placeholder/200/120"
-    },
-    {
-      title: "Salicylic Acid vs Benzoyl Peroxide for Acne",
-      channel: "Caroline Hirons",
-      duration: "6:22",
-      views: "456K",
-      thumbnail: "/api/placeholder/200/120"
-    }
-  ];
+  
+
+  useEffect(() => {
+    const fetchVideos = async () => {
+      // Replace with actual API call
+      const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=acne treatment&maxResults=3&type=video&key=${import.meta.env.VITE_YOUTUBE_API_KEY}`
+      )
+      const data = await res.json();
+
+
+      setVideos(data.items || []);
+    };
+
+
+    fetchVideos();
+  }, []);
+
+
 
   const getRiskColor = (risk: string) => {
     switch (risk.toLowerCase()) {
@@ -209,26 +208,39 @@ const ResultsSection = () => {
           </Card>
 
           {/* Educational Videos */}
-          <Card className="p-8 bg-gradient-card shadow-card-medical">
+ <Card className="p-8 bg-gradient-card shadow-card-medical">
             <div className="flex items-center gap-3 mb-6">
               <Play className="h-6 w-6 text-primary" />
               <h3 className="text-2xl font-bold">Educational Resources</h3>
             </div>
-            
+
+
             <div className="grid md:grid-cols-3 gap-6">
-              {videos.map((video, index) => (
-                <Card key={index} className="overflow-hidden hover:shadow-hover-medical transition-all duration-300 cursor-pointer">
-                  <div className="aspect-video bg-muted flex items-center justify-center relative group">
-                    <Play className="h-12 w-12 text-primary group-hover:scale-110 transition-transform" />
-                    <span className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                      {video.duration}
-                    </span>
+              {videos.map((video) => (
+                <Card
+                  key={video.id.videoId}
+                  className="overflow-hidden hover:shadow-hover-medical transition-all duration-300"
+                >
+                  <div className="aspect-video">
+                    <iframe
+                      className="w-full h-full"
+                      src={`https://www.youtube.com/embed/${video.id.videoId}`}
+                      title={video.snippet.title}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    ></iframe>
                   </div>
+
+
                   <div className="p-4">
-                    <h4 className="font-semibold mb-2 line-clamp-2">{video.title}</h4>
+                    <h4 className="font-semibold mb-2 line-clamp-2">
+                      {video.snippet.title}
+                    </h4>
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>{video.channel}</span>
-                      <span>{video.views} views</span>
+                      <span>{video.snippet.channelTitle}</span>
+                      {/* If you don’t have views from API, remove or mock */}
+                      <span>{video.views ? `${video.views} views` : ""}</span>
                     </div>
                   </div>
                 </Card>
