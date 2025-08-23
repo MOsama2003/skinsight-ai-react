@@ -7,10 +7,24 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependency directories
 node_modules
+
+# Build outputs
 dist
 dist-ssr
+
+# Local env files
 *.local
+.env
+.env.*.local
+
+# Service account / credentials (VERY IMPORTANT)
+*.json
+!package.json   # keep package.json tracked
+!package-lock.json
+!pnpm-lock.yaml
+!yarn.lock
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +36,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# TypeScript build artifacts
+*.tsbuildinfo
