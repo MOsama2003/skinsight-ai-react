@@ -63,14 +63,14 @@ function buildChatCompletionsPayload(args: {
             content: [
               {
                 type: 'text',
-                text: 'You are an expert dermatology assistant. Provide non-diagnostic guidance only.',
+                text: 'You are an expert dermatology assistant providing non-diagnostic educational guidance. Always respond with valid JSON in this exact format: {"condition": "...", "explanation": "...", "causes": ["...", "..."], "steps": ["...", "..."], "doctor": "..."}. Do not wrap the JSON in markdown code blocks.',
               },
             ],
           },
           {
             role: 'user',
             content: [
-              { type: 'text', text: args.prompt || 'Describe this image.' },
+              { type: 'text', text: args.prompt || 'Analyze this skin photo and provide educational information about potential conditions.' },
               { type: 'image_url', image_url: { url: args.imageUrlOrData } },
             ],
           },
@@ -79,6 +79,29 @@ function buildChatCompletionsPayload(args: {
       },
     ],
   };
+}
+
+// Helper function to extract JSON from model response
+function extractJsonFromResponse(content: string): any {
+  try {
+    // Try to parse directly first
+    return JSON.parse(content);
+  } catch {
+    // If direct parsing fails, try to extract from markdown code blocks
+    const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[1]);
+      } catch {
+        // Fallback: try to find JSON-like content
+        const objectMatch = content.match(/\{[\s\S]*\}/);
+        if (objectMatch) {
+          return JSON.parse(objectMatch[0]);
+        }
+      }
+    }
+    throw new Error('No valid JSON found in response');
+  }
 }
 
 // ---- Status ----
@@ -109,7 +132,7 @@ app.post('/analyze', (req, res) => {
     try {
       const prompt =
         (req.body?.prompt as string) ||
-        'Analyze this skin photo for educational purposes. Do NOT diagnose.';
+        'Analyze this skin photo for educational purposes. Provide information about potential conditions, causes, care steps, and when to see a doctor.';
 
       // Accept either an uploaded file OR imageUrl in the body (multipart or JSON)
       const files = (req as any).files as Express.Multer.File[] | undefined;
@@ -146,20 +169,16 @@ app.post('/analyze', (req, res) => {
         // Local mock for UI testing
         return res.json({
           ok: true,
-          source: 'mock',
-          mock: {
-            condition: 'Possible eczema',
-            explanation:
-              'Dry, itchy patches with mild redness—consistent with non-diagnostic eczema signs.',
-            causes: ['Dry skin barrier', 'Irritants', 'Allergens'],
-            steps: [
-              'Moisturize 2–3x daily (fragrance-free)',
-              'Avoid hot showers & harsh soaps',
-              'Short course OTC 1% hydrocortisone if itchy',
-            ],
-            doctor:
-              'See a clinician if worsening, infection signs, or no improvement in 5–7 days.',
-          },
+          condition: 'Possible eczema',
+          explanation: 'Dry, itchy patches with mild redness—consistent with non-diagnostic eczema signs.',
+          causes: ['Dry skin barrier', 'Irritants', 'Allergens'],
+          steps: [
+            'Moisturize 2–3x daily (fragrance-free)',
+            'Avoid hot showers & harsh soaps',
+            'Short course OTC 1% hydrocortisone if itchy',
+          ],
+          doctor: 'See a clinician if worsening, infection signs, or no improvement in 5–7 days.',
+          source: 'mock'
         });
       }
 
@@ -189,8 +208,42 @@ app.post('/analyze', (req, res) => {
         });
       }
 
-      const json = tryParse(text);
-      return res.json({ ok: true, raw: json, usedHost: host });
+      const responseJson = tryParse(text);
+      
+      // Extract the actual model response
+      const modelContent = responseJson?.predictions?.choices?.[0]?.message?.content;
+      if (!modelContent) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No content in model response',
+          raw: responseJson
+        });
+      }
+
+      // Parse the JSON from the model's response
+      try {
+        const analyzedData = extractJsonFromResponse(modelContent);
+        
+        return res.json({
+          ok: true,
+          condition: analyzedData.condition,
+          explanation: analyzedData.explanation,
+          causes: analyzedData.causes || [],
+          steps: analyzedData.steps || [],
+          doctor: analyzedData.doctor,
+          source: 'medgemma',
+          usage: responseJson?.predictions?.usage
+        });
+      } catch (parseError) {
+        console.error('Failed to parse model JSON response:', parseError);
+        return res.status(502).json({
+          ok: false,
+          error: 'Failed to parse model response as JSON',
+          rawContent: modelContent,
+          parseError: parseError.message
+        });
+      }
+
     } catch (e: any) {
       console.error('[Analyze] error', e);
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
