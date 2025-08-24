@@ -1,164 +1,115 @@
-import { useRef, useState, useMemo, useCallback } from "react";
-import { analyzeImage, getProducts, getVideos, type AnalyzeResponse } from "@/lib/api";
+import React, { useRef, useState } from "react";
+import { analyzeImage } from "@/lib/api";
 
-function RiskBadgeInline({ level }: { level: "Low"|"Medium"|"High" }) {
-  const map = { Low:"bg-emerald-100 text-emerald-800", Medium:"bg-amber-100 text-amber-800", High:"bg-red-100 text-red-800" } as const;
-  return <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${map[level]}`}>{level} risk</span>;
-}
-const prettyPercent = (x?: number) => `${Math.round((x ?? 0) * 100)}%`;
-
-export default function SkinSightUploadAnalyze({ userId = "demo-user", fetchResources = true }: { userId?: string; fetchResources?: boolean; }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+export default function SkinSightUploadAnalyze() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [prompt, setPrompt] = useState<string>("You are assisting with non-diagnostic dermatology triage. Return JSON: condition, explanation, causes[], steps[], doctor.");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<AnalyzeResponse | null>(null);
-  const [products, setProducts] = useState<any[]>([]);
-  const [videos, setVideos] = useState<any[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const choose = () => inputRef.current?.click();
-
-  const onFile = (f?: File | null) => {
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
     if (!f) return;
-    console.groupCollapsed("[SkinSight] File selected");
-    console.log("name:", f.name, "type:", f.type, "size:", f.size);
-    console.groupEnd();
     setFile(f);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(URL.createObjectURL(f));
-  };
+    const reader = new FileReader();
+    reader.onload = () => setPreview(reader.result as string);
+    reader.readAsDataURL(f);
+  }
 
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); };
-  const prevent = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
-
-  const analyze = useCallback(async () => {
-    if (!file) return;
-    console.group("[SkinSight] Analyze");
-    console.log("Starting analysis for:", file.name);
-    console.time("[SkinSight] Analyze duration");
-    setBusy(true); setError(null); setData(null); setProducts([]); setVideos([]);
-    try {
-      const res = await analyzeImage(file, userId);
-      console.log("✓ Analysis response:", res);
-      setData(res);
-      if (fetchResources && res?.result?.condition) {
-        const query = `${res.result.condition} treatment dermatology`;
-        console.groupCollapsed("[SkinSight] Fetch resources");
-        console.log("Query:", query);
-        try {
-          const [prods, vids] = await Promise.all([getProducts(), getVideos(query)]);
-          console.log("Products:", prods); console.log("Videos:", vids);
-          setProducts(prods.items || []); setVideos(vids.items || []);
-        } catch (e) { console.warn("Resource fetch failed (continuing):", e); }
-        console.groupEnd();
-      }
-      console.log("✓ Done");
-    } catch (e:any) {
-      console.error("✗ Analysis failed:", e);
-      setError(e?.message || "Analyze failed");
-    } finally {
-      setBusy(false);
-      console.timeEnd("[SkinSight] Analyze duration");
-      console.groupEnd();
+  async function onAnalyze() {
+    if (!file) {
+      setError("Please select an image first.");
+      return;
     }
-  }, [file, userId, fetchResources]);
-
-  const riskClass = useMemo(() => (data?.result?.risk === "High" ? "bg-red-50" : data?.result?.risk === "Medium" ? "bg-amber-50" : "bg-emerald-50"), [data?.result?.risk]);
+    setError(null);
+    setLoading(true);
+    setResult(null);
+    try {
+      const data = await analyzeImage(file, prompt);
+      setResult(data);
+      if ((data as any)?.ok !== true) {
+        setError((data as any)?.error || "Analyze failed");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Analyze error");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2 items-start">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)]">
-        <div className="p-6">
-          <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center"
-               onDragEnter={prevent} onDragOver={prevent} onDragLeave={prevent} onDrop={onDrop}>
-            <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e)=>onFile(e.target.files?.[0] || null)} />
-            <div className="text-sm text-slate-600">Drag & drop an image here, or</div>
-            <button onClick={choose} className="mt-3 inline-flex items-center px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-semibold">Browse files</button>
-            <div className="text-xs text-slate-500 mt-3">Avoid faces/tattoos. Not medical advice.</div>
-          </div>
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold">SkinSight AI — Upload & Analyze</h1>
 
-          {file && (
-            <div className="mt-4 grid gap-3">
-              <div className="text-sm">Selected: <span className="text-slate-600">{file.name}</span></div>
-              {preview && <img src={preview} alt="preview" className="w-full aspect-video object-cover rounded-lg border" />}
-            </div>
-          )}
-
-          <div className="mt-5 flex gap-3">
-            <button onClick={analyze} disabled={!file || busy} className="inline-flex items-center px-4 py-2 rounded-lg bg-black text-white font-semibold disabled:opacity-50">{busy ? "Analyzing…" : "Analyze photo"}</button>
-            <button onClick={()=>{ console.log("[SkinSight] Reset UI state"); setFile(null); setPreview(null); setData(null); setError(null); setProducts([]); setVideos([]); }}
-                    className="inline-flex items-center px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50">Reset</button>
-          </div>
-
-          {error && <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</div>}
-        </div>
+      <div className="space-y-3">
+        <label className="block text-sm font-medium">Image</label>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          onChange={onFileChange}
+          className="block w-full border rounded p-2"
+        />
+        {preview && <img src={preview} alt="preview" className="max-h-64 rounded border" />}
       </div>
 
-      <div className="grid gap-6">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)]">
-          <div className="p-6">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xl font-semibold">{data?.result?.condition ?? "Result"}</h2>
-              {data?.result?.risk && <RiskBadgeInline level={data.result.risk} />}
-            </div>
-            {!data && <p className="text-slate-500 text-sm mt-1">Upload an image and click Analyze to see the findings.</p>}
-            {data && (
-              <div className={`mt-3 rounded-xl p-4 ${riskClass}`}>
-                <div className="text-sm text-slate-600">Confidence: {prettyPercent(data.result.confidence)}</div>
-                <p className="mt-2">{data.result.explanation}</p>
-                {!!data.result.possible_causes?.length && <p className="mt-2 text-sm"><b>Possible causes:</b> {data.result.possible_causes.join(", ")}</p>}
-                {!!data.result.recommended_next_steps?.length && (
-                  <div className="mt-3">
-                    <b className="text-sm">Next steps:</b>
-                    <ul className="list-disc ml-5 text-sm mt-1">
-                      {data.result.recommended_next_steps.map((s) => <li key={s}>{s}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {data.result.when_to_see_doctor && <p className="mt-2 italic text-sm">{data.result.when_to_see_doctor}</p>}
-                <p className="text-xs text-slate-500 mt-3">Disclaimer: Not medical advice.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {fetchResources && data && (
-          <>
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)] p-6">
-              <h3 className="text-lg font-semibold mb-2">Over-the-counter products</h3>
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {products.length ? products.map((p:any)=>(
-                  <a key={p.id} href={p.link} target="_blank" rel="noreferrer"
-                     className="min-w-[240px] p-4 border rounded-xl hover:shadow-md transition-shadow">
-                    <div className="font-medium">{p.name}</div>
-                    <div className="text-xs text-slate-500 mt-1">For: {p.use}</div>
-                    <div className="text-xs mt-2">{p.notes}</div>
-                  </a>
-                )) : <div className="text-sm text-slate-500">No products yet.</div>}
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)] p-6">
-              <h3 className="text-lg font-semibold mb-2">Educational videos</h3>
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {videos.length ? videos.map((v:any)=>(
-                  <a key={v.videoId} href={`https://youtube.com/watch?v=${v.videoId}`} target="_blank" rel="noreferrer"
-                     className="min-w-[260px] border rounded-xl hover:shadow-md transition-shadow">
-                    {v.thumbnail && <img src={v.thumbnail} alt={v.title} className="rounded-t-xl w-full aspect-video object-cover border-b" />}
-                    <div className="p-3">
-                      <div className="text-sm font-medium line-clamp-2">{v.title}</div>
-                      <div className="text-xs text-slate-500">{v.channel}</div>
-                    </div>
-                  </a>
-                )) : <div className="text-sm text-slate-500">No videos yet.</div>}
-              </div>
-            </div>
-          </>
-        )}
+      <div className="space-y-3">
+        <label className="block text-sm font-medium">
+          Prompt <span className="text-xs text-gray-500">(required by your endpoint)</span>
+        </label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={4}
+          className="w-full border rounded p-2"
+          placeholder="Describe how the model should analyze the image…"
+        />
       </div>
 
-      <p className="lg:col-span-2 text-xs text-slate-500">This is not medical advice.</p>
+      <div className="flex gap-3">
+        <button
+          onClick={onAnalyze}
+          disabled={loading}
+          className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
+        >
+          {loading ? "Analyzing…" : "Analyze"}
+        </button>
+        <button
+          onClick={() => {
+            setFile(null);
+            setPreview(null);
+            if (inputRef.current) inputRef.current.value = "";
+            setResult(null);
+            setError(null);
+          }}
+          className="px-4 py-2 rounded border"
+        >
+          Reset
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 border border-red-300 text-red-700 rounded bg-red-50">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="p-3 border rounded bg-gray-50">
+          <h2 className="font-semibold mb-2">Raw Result</h2>
+          <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(result, null, 2)}</pre>
+          <p className="mt-2 text-xs text-gray-500">
+            schema tried: <code>{result?.schema}</code>
+          </p>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-500">
+        Disclaimer: This tool provides non-diagnostic, informational output. Always consult a clinician for medical advice.
+      </p>
     </div>
   );
 }
