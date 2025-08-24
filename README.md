@@ -11,7 +11,7 @@
 [![Vite](https://img.shields.io/badge/Vite-5.4.19-646CFF?style=flat-square&logo=vite)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4.17-38B2AC?style=flat-square&logo=tailwind-css)](https://tailwindcss.com/)
 
-[Live Demo](https://lovable.dev/projects/6fb8a2c5-62b3-4c0b-af67-ae37fc80b5ae) • [Features](#features) • [Tech Stack](#tech-stack) • [Getting Started](#getting-started)
+[Live Demo](https://68ab62329190c85ecc038f20--dermaclearai.netlify.app/) • [Features](#features) • [Tech Stack](#tech-stack) • [Getting Started](#getting-started)
 
 </div>
 
@@ -53,10 +53,7 @@
 - **Interactive Learning**: Engaging articles with practical applications
 
 ### 🌍 Global Reach & Support
-- **Multi-Location Support**: Offices in New York, London, and Singapore
 - **24/7 AI Assistance**: Round-the-clock AI-powered support
-- **Professional Team**: Medical advisors and AI development experts
-- **Contact Channels**: Multiple ways to reach our support team
 
 
 ## 🛠️ Tech Stack
