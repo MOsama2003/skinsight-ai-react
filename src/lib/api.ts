@@ -21,6 +21,7 @@ export async function analyzeImage(file: File, userId?: string): Promise<Analyze
   const form = new FormData();
   form.append("image", file);
   if (userId) form.append("userId", userId);
+
   const r = await fetch(`${BASE}/analyze`, { method: "POST", body: form });
   if (!r.ok) {
     let msg = "Analyze failed";
@@ -38,4 +39,9 @@ export async function getProducts() {
 export async function getVideos(q: string) {
   const r = await fetch(`${BASE}/resources/videos?q=${encodeURIComponent(q)}`);
   return r.ok ? r.json() : { items: [] };
+}
+
+export async function getStatus() {
+  const r = await fetch(`${BASE}/status`, { cache: "no-store" as RequestCache });
+  return r.ok ? r.json() : { mode: "unknown" };
 }

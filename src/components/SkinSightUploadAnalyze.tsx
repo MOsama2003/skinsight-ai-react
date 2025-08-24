@@ -1,5 +1,5 @@
-import { useRef, useState, useMemo, useCallback } from "react";
-import { analyzeImage, getProducts, getVideos, type AnalyzeResponse } from "@/lib/api";
+import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { analyzeImage, getProducts, getVideos, getStatus, type AnalyzeResponse } from "@/lib/api";
 
 function RiskBadgeInline({ level }: { level: "Low"|"Medium"|"High" }) {
   const map = { Low:"bg-emerald-100 text-emerald-800", Medium:"bg-amber-100 text-amber-800", High:"bg-red-100 text-red-800" } as const;
@@ -16,6 +16,11 @@ export default function SkinSightUploadAnalyze({ userId = "demo-user", fetchReso
   const [data, setData] = useState<AnalyzeResponse | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [videos, setVideos] = useState<any[]>([]);
+  const [mode, setMode] = useState<string>("unknown");
+
+  useEffect(() => {
+    getStatus().then(s => setMode(s.mode)).catch(()=>{});
+  }, []);
 
   const choose = () => inputRef.current?.click();
 
@@ -68,6 +73,7 @@ export default function SkinSightUploadAnalyze({ userId = "demo-user", fetchReso
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 items-start">
+      {/* Uploader */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)]">
         <div className="p-6">
           <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center"
@@ -92,9 +98,12 @@ export default function SkinSightUploadAnalyze({ userId = "demo-user", fetchReso
           </div>
 
           {error && <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</div>}
+
+          <p className="mt-4 text-xs text-slate-500">Backend mode: <b>{mode}</b> • This is not medical advice.</p>
         </div>
       </div>
 
+      {/* Results */}
       <div className="grid gap-6">
         <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)]">
           <div className="p-6">
@@ -123,6 +132,7 @@ export default function SkinSightUploadAnalyze({ userId = "demo-user", fetchReso
           </div>
         </div>
 
+        {/* Resources */}
         {fetchResources && data && (
           <>
             <div className="bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgba(2,132,199,0.08)] p-6">
