@@ -10,7 +10,7 @@ const Index = () => {
       <Header />
       <HeroSection />
       <UploadSection />
-      <ResultsSection />
+      {/* <ResultsSection /> */}
       <Footer />
     </div>
   );
