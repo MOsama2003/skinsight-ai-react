@@ -2,287 +2,194 @@ import express from "express";
 import multer from "multer";
 import cors from "cors";
 import dotenv from "dotenv";
-import crypto from "crypto";
-import { GoogleAuth } from "google-auth-library";
-import { request as gaxiosRequest } from "gaxios";
+import fs from "fs";
+import path from "path";
+import { JWT } from "google-auth-library";
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const app = express();
-const port = 8000;
-
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ------------------ ENV + helpers ------------------
+const USE_VERTEX = (process.env.USE_VERTEX ?? "true") === "true";
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.PROJECT_ID ?? process.env.PROJECT ?? "";
+const LOCATION = process.env.VERTEX_LOCATION ?? process.env.LOCATION ?? "us-central1";
+const PROJECT_NUMBER = process.env.PROJECT_NUMBER ?? "";
+const ENDPOINT_ID = process.env.ENDPOINT_ID ?? ""; // e.g. 8652720004480892928
 
-const PROJECT_ID = process.env.GCP_PROJECT || "";
-const LOCATION = process.env.GCP_LOCATION || "us-central1";
-const ENDPOINT_ID = process.env.MEDGEMMA_ENDPOINT_ID || "";
-const PROJECT_NUMBER = process.env.GCP_PROJECT_NUMBER || "";
-// Note: GOOGLE_APPLICATION_CREDENTIALS or GAC should point to your JSON key file on disk.
+// For dedicated endpoints you MUST hit the dedicated domain (not aiplatform.googleapis.com)
+const DEDICATED_HOST = `${ENDPOINT_ID}.${LOCATION}-${PROJECT_NUMBER}.prediction.vertexai.goog`;
+const PREDICT_URL = `https://${DEDICATED_HOST}/v1/projects/${PROJECT_ID}/locations/${LOCATION}/endpoints/${ENDPOINT_ID}:predict?$alt=json;enum-encoding=int`;
 
-function dedicatedHost() {
-  // <endpoint>.<location>-<projectNumber>.prediction.vertexai.goog
-  if (!ENDPOINT_ID || !LOCATION || !PROJECT_NUMBER) {
-    throw new Error(
-      "Missing one of MEDGEMMA_ENDPOINT_ID, GCP_LOCATION, or GCP_PROJECT_NUMBER"
-    );
-  }
-  return `${ENDPOINT_ID}.${LOCATION}-${PROJECT_NUMBER}.prediction.vertexai.goog`;
+// Service account
+const GAC_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GAC || "";
+if (!GAC_PATH) {
+  console.warn("[WARN] GOOGLE_APPLICATION_CREDENTIALS (GAC) not set; using ADC if available.");
 }
 
-function predictUrl() {
-  if (!PROJECT_ID) {
-    throw new Error("GCP_PROJECT is not set");
-  }
-  return `https://${dedicatedHost()}/v1/projects/${PROJECT_ID}/locations/${LOCATION}/endpoints/${ENDPOINT_ID}:predict`;
-}
-
-function asBase64(buf: Buffer) {
-  return buf.toString("base64");
-}
-
-function riskFromText(text: string) {
-  if (!text) return "low";
-  const t = text.toLowerCase();
-  if (t.includes("urgent") || t.includes("emergency")) return "high";
-  if (t.includes("doctor") || t.includes("specialist") || t.includes("dermatologist")) return "medium";
-  return "low";
-}
-
-function cleanJsonTextBlock(text: string) {
-  return text.replace(/```json|```/g, "").trim();
-}
-
-function tryParseJSON(text?: string) {
-  if (!text) return null;
-  try {
-    return JSON.parse(cleanJsonTextBlock(text));
-  } catch {
-    return null;
-  }
-}
-
-function extractText(predictions: any): string | null {
-  try {
-    const p0 = Array.isArray(predictions) ? predictions[0] : predictions;
-    if (!p0) return null;
-
-    // Common model shapes
-    if (p0?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return p0.candidates[0].content.parts[0].text;
-    }
-    if (p0?.content?.[0]?.parts?.[0]?.text) {
-      return p0.content[0].parts[0].text;
-    }
-    if (p0?.output) return p0.output;
-    if (p0?.text) return p0.text;
-
-    // Last resort
-    return typeof p0 === "string" ? p0 : JSON.stringify(p0);
-  } catch {
-    return null;
-  }
-}
-
-// ------------------ Vertex REST call ------------------
-
-async function vertexRestPredict(body: any) {
-  const auth = new GoogleAuth({
+let client: JWT | null = null;
+async function getClient() {
+  if (client) return client;
+  client = new JWT({
+    keyFile: GAC_PATH || undefined,
     scopes: ["https://www.googleapis.com/auth/cloud-platform"],
   });
-  const client = await auth.getClient();
-  const accessToken = await client.getAccessToken();
-
-  const url = predictUrl();
-  const t = `[REST] POST ${url}`;
-  console.time(t);
-
-  const resp = await gaxiosRequest({
-    url,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken.token || accessToken as any}`,
-      "Content-Type": "application/json",
-      "X-Goog-User-Project": PROJECT_ID, // helps with quota/billing scoping
-    },
-    data: body,
-    responseType: "json",
-    timeout: 60_000,
-  });
-
-  console.timeEnd(t);
-  return resp.data;
+  await client.authorize();
+  return client;
 }
-
-// ------------------ Body schemas to try ------------------
-
-// A) content[] (Gemini-like)
-function schemaA(imageB64: string, mime: string) {
-  return {
-    instances: [
-      {
-        content: [
-          {
-            role: "user",
-            parts: [
-              {
-                text:
-                  "You are assisting with non-diagnostic dermatology triage.\n" +
-                  "Return possible conditions, plain-language explanation, and when to see a clinician.\n" +
-                  "Never provide a definitive diagnosis. Output JSON with keys:\n" +
-                  "condition, explanation, causes[], steps[], doctor.\n",
-              },
-              {
-                inlineData: { mimeType: mime, data: imageB64 },
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  };
-}
-
-// B) inputs + image
-function schemaB(imageB64: string, mime: string) {
-  return {
-    instances: [
-      {
-        inputs: {
-          prompt:
-            "You are assisting with *non-diagnostic* dermatology triage.\n" +
-            "Return possible conditions, plain-language explanation, and when to see a clinician.\n" +
-            "Never provide definitive diagnosis.\n\n" +
-            "Image: <image>. Format as JSON with keys: condition, explanation, causes[], steps[], doctor.",
-          image: { bytesBase64Encoded: imageB64, mimeType: mime },
-        },
-        parameters: { max_new_tokens: 400, temperature: 0.2, top_p: 0.9 },
-      },
-    ],
-  };
-}
-
-// C) input_bytes + prompt
-function schemaC(imageB64: string, mime: string) {
-  return {
-    instances: [
-      {
-        prompt:
-          "You are assisting with non-diagnostic dermatology triage.\n" +
-          "Return possible conditions, plain-language explanation, and when to see a clinician.\n" +
-          "Never provide a definitive diagnosis. Output JSON with keys:\n" +
-          "condition, explanation, causes[], steps[], doctor.\n",
-        input_bytes: { b64: imageB64, mime_type: mime },
-        parameters: { max_new_tokens: 400, temperature: 0.2, top_p: 0.9 },
-      },
-    ],
-  };
-}
-
-// ------------------ Main call (tries multiple shapes) ------------------
-
-async function callMedModel(image: Buffer, mime: string) {
-  const b64 = asBase64(image);
-
-  const candidates = [
-    { name: "A: content[]", body: schemaA(b64, mime) },
-    { name: "B: inputs+image", body: schemaB(b64, mime) },
-    { name: "C: input_bytes", body: schemaC(b64, mime) },
-  ];
-
-  let lastErr: any = null;
-
-  for (const c of candidates) {
-    try {
-      console.log(`[MedModel] Trying ${c.name}`);
-      const data = await vertexRestPredict(c.body);
-      const predictions = (data && (data.predictions || data)) as any;
-      const text = extractText(predictions);
-      const structured = tryParseJSON(text || "");
-
-      const result = {
-        condition: structured?.condition || "Possible skin condition",
-        confidence: typeof structured?.confidence === "number" ? structured.confidence : 0.65,
-        risk: structured?.risk || riskFromText(structured?.doctor || structured?.explanation || text || ""),
-        explanation:
-          structured?.explanation ||
-          (text ? String(text).slice(0, 1200) : "No explanation provided by the model."),
-        possible_causes: Array.isArray(structured?.causes) ? structured.causes : [],
-        recommended_next_steps: Array.isArray(structured?.steps) ? structured.steps : [],
-        when_to_see_doctor:
-          structured?.doctor || "Consider a clinician if symptoms persist, spread, or worsen.",
-      };
-
-      console.log(`[MedModel] Success with ${c.name}`);
-      return { scanId: crypto.randomUUID(), imageUrl: null, result };
-    } catch (e: any) {
-      lastErr = e;
-      const status = e?.response?.status || e?.code || e?.status || "unknown";
-      const msg =
-        e?.response?.data?.error?.message ||
-        e?.response?.data ||
-        e?.message ||
-        String(e);
-      console.warn(`[MedModel] ${c.name} failed:`, status, msg);
-      // keep looping to try next schema
-    }
-  }
-
-  throw lastErr || new Error("All schema attempts failed.");
-}
-
-// ------------------ Routes ------------------
 
 app.get("/status", (_req, res) => {
-  let host = "unset";
-  try {
-    host = dedicatedHost();
-  } catch {
-    // ignore
-  }
   res.json({
-    mode: "vertex-rest",
+    mode: USE_VERTEX ? "vertex" : "mock",
     project: PROJECT_ID || "unset",
     location: LOCATION,
     endpointId: ENDPOINT_ID || "unset",
     projectNumber: PROJECT_NUMBER || "unset",
-    dedicatedHost: host,
-    credsFrom: process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GAC || "ADC/default",
+    dedicatedHost: DEDICATED_HOST,
   });
 });
 
+// ---- Helper: build minimal schemas (G/H first) ----
+function schemaG(imageB64: string, prompt: string) {
+  // simple array field "images" + required "prompt"
+  return {
+    instances: [
+      {
+        prompt: prompt || "Analyze this medical skin photo and summarize possible conditions in JSON.",
+        images: [imageB64],
+      },
+    ],
+  };
+}
+
+function schemaH(imageB64: string, prompt: string) {
+  // single key "image_base64" + required "prompt"
+  return {
+    instances: [
+      {
+        prompt: prompt || "Analyze this medical skin photo and summarize possible conditions in JSON.",
+        image_base64: imageB64,
+      },
+    ],
+  };
+}
+
+// Fallbacks (only if G/H fail)
+function schemaA(imageB64: string, prompt: string) {
+  return {
+    instances: [
+      {
+        prompt:
+          prompt ||
+          "You are assisting with non-diagnostic dermatology triage. Return JSON: condition, explanation, causes[], steps[], doctor.",
+        image: imageB64, // very plain
+      },
+    ],
+  };
+}
+
+function schemaB(imageB64: string, prompt: string) {
+  return {
+    instances: [
+      {
+        prompt:
+          prompt ||
+          "You are assisting with non-diagnostic dermatology triage. Return JSON: condition, explanation, causes[], steps[], doctor.",
+        image_data: imageB64, // another plain wrapper
+      },
+    ],
+  };
+}
+
+// Send REST predict
+async function vertexPredictREST(body: any) {
+  const auth = await getClient();
+  const token = await auth.getAccessToken();
+
+  const resp = await fetch(PREDICT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token?.token || token}`,
+      "Content-Type": "application/json",
+      "x-goog-request-params": `endpoint=projects/${PROJECT_ID}/locations/${LOCATION}/endpoints/${ENDPOINT_ID}`,
+      "x-goog-api-client": "custom-dermaai/0.1 rest",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
+  }
+  return resp.json();
+}
+
 app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+    if (!USE_VERTEX) {
+      return res.json({
+        mock: true,
+        condition: "acne (mock)",
+        risk: "Low",
+        explanation: "Mock response for demo.",
+        steps: ["Wash with gentle cleanser", "Use OTC benzoyl peroxide 2.5-5%"],
+      });
+    }
 
-    const out = await callMedModel(req.file.buffer, req.file.mimetype || "image/jpeg");
-    return res.json(out);
-  } catch (err: any) {
-    console.error("[Analyze] error", err);
-    const safeStatus =
-      (err?.response?.status && Number(err.response.status)) ||
-      (err?.code && Number(err.code) >= 400 && Number(err.code) < 600 && Number(err.code)) ||
-      502;
+    // image
+    if (!req.file?.buffer) {
+      return res.status(400).json({ error: "No image uploaded" });
+    }
+    const imageBuffer = req.file.buffer;
+    const imageB64 = imageBuffer.toString("base64");
+    const promptFromClient = (req.body?.prompt as string) || "";
 
-    return res.status(safeStatus).json({
-      error: "Analysis failed",
-      details:
-        err?.response?.data?.error?.message ||
-        err?.response?.data ||
-        err?.message ||
-        String(err),
+    // Try schemas in order: G -> H -> A -> B
+    const attempts = [
+      { name: "G images[] + prompt", body: schemaG(imageB64, promptFromClient) },
+      { name: "H image_base64 + prompt", body: schemaH(imageB64, promptFromClient) },
+      { name: "A image + prompt", body: schemaA(imageB64, promptFromClient) },
+      { name: "B image_data + prompt", body: schemaB(imageB64, promptFromClient) },
+    ];
+
+    let lastErr: any = null;
+    for (const attempt of attempts) {
+      try {
+        console.time(`[MedGemma] ${attempt.name}`);
+        const json = await vertexPredictREST(attempt.body);
+        console.timeEnd(`[MedGemma] ${attempt.name}`);
+
+        // Return raw predictions; frontend formats
+        return res.json({
+          ok: true,
+          schema: attempt.name,
+          vertex: json,
+        });
+      } catch (e: any) {
+        lastErr = e;
+        console.warn(`[MedGemma] ${attempt.name} failed:`, e.message || e);
+      }
+    }
+
+    // If none worked:
+    return res.status(502).json({
+      error: "All schema attempts failed. See server logs.",
+      detail: lastErr?.message || String(lastErr),
     });
+  } catch (err: any) {
+    console.error("[Analyze] fatal", err);
+    return res.status(500).json({ error: err?.message || "Unknown error" });
   }
 });
 
-// ------------------ Start ------------------
-
-app.listen(port, () => {
-  console.log(`Analyze API running at http://localhost:${port}`);
+const PORT = process.env.API_PORT ? Number(process.env.API_PORT) : 8000;
+app.listen(PORT, () => {
+  console.log(`Analyze API running at http://localhost:${PORT}`);
   console.log(
-    `[ENV] USE_VERTEX=true, PROJECT=${PROJECT_ID}, LOCATION=${LOCATION}, ENDPOINT_ID=${ENDPOINT_ID}, PROJECT_NUMBER=${PROJECT_NUMBER}, GAC=${process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GAC}`
+    `[ENV] USE_VERTEX=${USE_VERTEX}, PROJECT=${PROJECT_ID}, LOCATION=${LOCATION}, ENDPOINT_ID=${ENDPOINT_ID}, PROJECT_NUMBER=${PROJECT_NUMBER}, GAC=${GAC_PATH ? "set" : "undefined"}`
   );
 });
